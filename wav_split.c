@@ -1,4 +1,3 @@
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sndfile.h>
@@ -26,17 +25,23 @@ void sf_err_print(int sf_err_code){
     }
 }
 
-void print_file_info(const char* file_name, const SF_INFO *sf_info){
-    if(!file_name || !sf_info){
+void print_file_info(wav_split_file_t *file){
+
+    if(!file){
         fprintf(stderr, "[ERROR] Passed invalid file info to print_file_info()");
     }
 
-    printf("Input File: %s\n", file_name);
-    printf("    Length: %.1f Seconds\n", (double)sf_info->frames/sf_info->samplerate);
-    printf("    Channels: %d\n", sf_info->channels);
-    printf("    Sample Rate: %d\n", sf_info->samplerate);
-    printf("    Samples: %d\n", (int)sf_info->frames);
-
+    printf("Input File: %s\n", file->name);
+    printf("    Length: %.1f Seconds\n", (double)file->info.frames/file->info.samplerate);
+    printf("    Channels: %d\n", file->info.channels);
+    printf("    Sample Rate: %dHz\n", file->info.samplerate);
+    if(file->bit_depth > 0)
+        printf("    Bit-depth: %d\n", file->bit_depth);
+    else
+    {
+        printf("    Bit-depth: unsupported\n");
+    }
+    
 }
 
 const char* generate_output_filename(const char* filename, int index){
@@ -53,94 +58,144 @@ const char* generate_output_filename(const char* filename, int index){
     char *out_filename = malloc(filename_size + (sizeof(char) * 2));
     snprintf(out_filename, filename_size+(sizeof(char) * 2), "%s_%d.%s",  base_filename, index, file_ext);
 
+    free(new_filename);
+
     return out_filename;
 }
 
-int main(){
+wav_split_file_t* init_wav_split_file(){
 
-    //Use libsndfile to split multi-channel wav file into mono wavs
-    int err = 0;
-    SNDFILE *in_file;
-    SF_INFO in_file_info;
-    memset(&in_file_info, 0, sizeof(SF_INFO));
+    wav_split_file_t *temp;
+    temp = (wav_split_file_t*)malloc(sizeof(wav_split_file_t));
 
-    const char* in_file_name = "/Users/cston/Developer/libsndfile_ex/2_chan_id.wav";
-    //Open input file
-    in_file = sf_open(in_file_name, SFM_READ, &in_file_info);
-    if((err = sf_error(in_file))){
-        printf("[ERROR] %s\n", sf_error_number(err));
+    if(!temp){ return NULL; };
+
+    temp->name = "";
+    temp->handle = NULL;
+    temp->bit_depth = -1;
+    temp->wav_type = "";
+
+    memset(&temp->info, 0, sizeof(SF_INFO));
+
+    return temp;
+}
+
+int main(int argc, char** argv){
+
+    int error = 0;
+    int num_channels;
+    int bit_depth_tag;
+    int bit_depth = -1;
+    int b_verbose = 1;
+    wav_split_file_t *in_file = init_wav_split_file();
+
+    if (argc < 2){
+        fprintf(stderr, "[ERROR] Require at least one argument\n");
         return 1;
     }
-    
-    //Show input file info
-    print_file_info(in_file_name, &in_file_info);
-
-    int num_outfiles= in_file_info.channels;
-    int wav_format = in_file_info.format & 0xffff0000;
-    int bit_depth_tag = in_file_info.format & 0xffff;
-
-    if(num_outfiles > MAX_NUM_CHANNELS){
-        fprintf(stderr, "[ERROR] Cannot process. Input file contains more than %d channels\n", MAX_NUM_CHANNELS);
-        return 1;
-    }
-    if(bit_depth_tag > 7){
-        fprintf(stderr, "[ERROR] Un-supported bit-depth format\n");
-        return 1;
-    }
-    if(!(wav_format == SF_FORMAT_WAV || wav_format == SF_FORMAT_WAV)){
-        fprintf(stderr, "[ERROR] Cannot process. Non- WAV or WAVEX format file\n");
-        return 1;
+    for(int i=1; i<argc; i++){
+        if(!strncmp(*(argv+i), "-v", 2)){
+            b_verbose = 1;
+        }else{
+            in_file->name = *(argv+i);
+        }
     }
 
-    const char *output_file_names[num_outfiles];
-    SNDFILE *output_files[num_outfiles];    
-    SF_INFO output_files_info[num_outfiles];
+#ifdef DEBUG
+    printf("Args: %s\n", in_file->name);
+    printf("Verbose: %d\n\n", b_verbose);
+#endif 
 
-    generate_output_filename(in_file_name, 1);
+    /* Open input file */
+    in_file->handle = sf_open(in_file->name, SFM_READ, &in_file->info);
+    if((error = sf_error(in_file->handle))){
+        printf("[ERROR] %s\n", sf_error_number(error));
+        return 1;
+    }
 
-    // Open output files
-    for(int i=0; i < num_outfiles; i++){
+    /* Get bit-depth info for file */
+    bit_depth_tag = in_file->info.format & 0xFFFF;
 
-        output_file_names[i] = generate_output_filename(in_file_name, i);
-        // printf("Output file %d: \"%s\"\n", i, output_file_names[i]);
+    switch(bit_depth_tag){
+        case (SF_FORMAT_PCM_S8):
+        case (SF_FORMAT_PCM_U8):
+            bit_depth = 8;
+            break;
+        case (SF_FORMAT_PCM_16):
+            bit_depth = 16;
+            break;
+        case (SF_FORMAT_PCM_24):
+            bit_depth = 24;
+            break;
+        case (SF_FORMAT_PCM_32):
+        case (SF_FORMAT_FLOAT):
+            bit_depth = 32;
+            break;
+        case (SF_FORMAT_DOUBLE):
+            bit_depth = 64;
+            break;
+        default:
+            break;
+    }
+    in_file->bit_depth = bit_depth;
 
-        memset(&output_files_info[i], 0, sizeof(SF_INFO));
-        output_files_info[i].channels = 1;
-        output_files_info[i].samplerate = in_file_info.samplerate;
-        output_files_info[i].format = in_file_info.format;
-        output_files_info[i].sections = in_file_info.sections;
-        output_files_info[i].seekable = in_file_info.seekable;
+    if (b_verbose){
+        print_file_info(in_file);
+        puts("");
+        printf("**Generating %d output files**\n", in_file->info.channels);
+    }
 
-        output_files[i] = sf_open(output_file_names[i], SFM_WRITE, &output_files_info[i]);
-        if((err = sf_error(output_files[i]))){
-             printf("[ERROR] %s\n", sf_error_number(err));
+    num_channels = in_file->info.channels;
+    wav_split_file_t *out_files[num_channels];
+
+    /* Open and format output files */
+    for(int i=0; i < num_channels; i++){
+        out_files[i] = init_wav_split_file();
+        out_files[i]->name = generate_output_filename(in_file->name, i);
+        out_files[i]->info.channels = 1; //MONO 1ch output
+        out_files[i]->info.samplerate = in_file->info.samplerate;
+        out_files[i]->info.format = in_file->info.format;
+
+        if(b_verbose)
+            printf("    [Output %d]: %s\n", i+1, out_files[i]->name);
+
+        /* Open file */
+        out_files[i]->handle = sf_open(out_files[i]->name, SFM_WRITE, &out_files[i]->info);
+        if( (error = sf_error(out_files[i]->handle)) ){
+            printf("[ERROR] %s\n", sf_error_number(error));
             return 1;
         }
     }
 
-    // Loop through input file
-    int read_count = 0;
-    int *data = malloc(sizeof(int) * MAX_NUM_CHANNELS);
-    while( (read_count = sf_readf_int(in_file, data, 1)) ){
-        // Read each channels word into it's own file
-        for(int ch=0; ch < num_outfiles; ch++){
-            sf_write_int(output_files[ch], &(data[ch]), 1);
+    int *data = malloc(sizeof(int) * num_channels);
+
+    /* Extract each channel word to it's own file */
+    while(sf_readf_int(in_file->handle, data, 1)){
+        for(int ch=0; ch < num_channels; ch++){
+            sf_write_int(out_files[ch]->handle, &(data[ch]), 1);
         }
     }
 
-    // Finalise output files
-    for(int i=0; i < num_outfiles; i++){
-        sf_close(output_files[i]);
+    /* get current file info for output files */ 
+    for(int i=0; i < num_channels; i++){
+        sf_command(out_files[i]->handle, SFC_GET_CURRENT_SF_INFO, &out_files[i]->info, sizeof(SF_INFO));
+        if(sf_error(out_files[i]->handle)){
+            printf("[ERROR] %s\n", sf_strerror(out_files[i]->handle));
+            return 1;
+        }
     }
 
-    // cleanup:
+    //Close output files
+    for(int i=0; i < num_channels; i++){
+        sf_close(out_files[i]->handle);
+    }
+
     //Close input file
-    if(in_file){
-        sf_close(in_file);
-    }
-    if(data){
+    if(in_file)
+        sf_close(in_file->handle);
+
+    if(data)
         free(data);
-    }
     
     return 0;
 }
