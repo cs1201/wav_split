@@ -3,6 +3,9 @@
 
 #include "sndfile.h"
 
+#define VERSION_MAJOR (1)
+#define VERSION_MINOR (0)
+
 typedef struct{
     const char *name;
     SNDFILE *handle;
@@ -12,7 +15,7 @@ typedef struct{
 }wav_split_file_t;
 
 /* Function prototypes*/
-void sf_err_print(int sf_err_code);
+void print_usage();
 void print_file_info(wav_split_file_t *file);
 wav_split_file_t* init_wav_split_file();
 const char* generate_output_filename(const char* filename, int index);

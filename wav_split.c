@@ -1,28 +1,16 @@
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <sndfile.h>
 
 #include "wav_split.h"
 
-void sf_err_print(int sf_err_code){
-    if (sf_err_code != SF_ERR_NO_ERROR){
-        switch(sf_err_code){
-            case (SF_ERR_UNRECOGNISED_FORMAT):
-                fprintf(stderr, "[ERROR] Unrecognised file format\n");
-                break;
-            case (SF_ERR_SYSTEM):
-                fprintf(stderr, "[ERROR] System Error\n");
-                break;
-            case (SF_ERR_MALFORMED_FILE):
-                fprintf(stderr, "[ERROR] Malformed File\n");
-                break;
-            case (SF_ERR_UNSUPPORTED_ENCODING):
-                fprintf(stderr, "[ERROR] Unsupported Encoding\n");
-                break;
-            default:
-                fprintf(stderr, "[ERROR] Unrecognised error\n");
-        }
-    }
+void print_usage(){
+    puts("\nWAV_SPLIT - Simple WAV file splitting utility");
+    puts("  Usage:");
+    puts("      wav_split {INPUT_FILE} -v");
+    puts("  Options:");
+    puts("      -v: verbose mode (show input file info and output file names)");
 }
 
 void print_file_info(wav_split_file_t *file){
@@ -80,6 +68,13 @@ wav_split_file_t* init_wav_split_file(){
     return temp;
 }
 
+int file_exists(const char *filename){
+    FILE *tmp =  fopen(filename, "rb");
+    int rtn = (tmp != NULL);
+    fclose(tmp);
+    return rtn;
+}
+
 int main(int argc, char** argv){
 
     int error = 0;
@@ -91,17 +86,25 @@ int main(int argc, char** argv){
 
     if (argc < 2){
         fprintf(stderr, "[ERROR] Require at least one argument\n");
+        print_usage();
         return 1;
     }
     for(int i=1; i<argc; i++){
         if(!strncmp(*(argv+i), "-v", 2)){
             b_verbose = 1;
         }else{
-            in_file->name = *(argv+i);
+            if(file_exists(*(argv+i))){
+                in_file->name = *(argv+i);
+            }else{
+                fprintf(stderr, "[ERROR] Could not access input file\n");
+                return 1;
+            }
+            
         }
     }
 
 #ifdef DEBUG
+    puts("DEBUG_INFO");
     printf("Args: %s\n", in_file->name);
     printf("Verbose: %d\n\n", b_verbose);
 #endif 
